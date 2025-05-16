@@ -25,6 +25,14 @@ namespace NtCoreLib.Win32.Rpc.Transport;
 public interface IRpcClientTransport : IDisposable
 {
     /// <summary>
+    /// Used by the transport to dispach callback functionality to the client
+    /// </summary>
+    /// <param name="proc_num">The callback procedure number</param>
+    /// <param name="ndr_buffer">Unmarshal NDR bufffer for the callback</param>
+    /// <returns></returns>
+    public delegate INdrMarshalBuffer RecieveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer);
+
+    /// <summary>
     /// Bind the RPC transport to a specified interface.
     /// </summary>
     /// <param name="interface_id">The interface ID to bind to.</param>
@@ -42,8 +50,9 @@ public interface IRpcClientTransport : IDisposable
     /// <param name="proc_num">The procedure number.</param>
     /// <param name="objuuid">The object UUID for the call.</param>
     /// <param name="ndr_buffer">Marshal NDR buffer for the call.</param>
+    /// <param name="callback_handler">An optional delegate to notify the client of an incoming callback</param>
     /// <returns>Client response from the send.</returns>
-    INdrUnmarshalBuffer SendReceive(int proc_num, Guid? objuuid, INdrMarshalBuffer ndr_buffer);
+    INdrUnmarshalBuffer SendReceive(int proc_num, Guid? objuuid, INdrMarshalBuffer ndr_buffer, RecieveSendCallback callback_handler = null);
 
     /// <summary>
     /// Add and authenticate a new security context.

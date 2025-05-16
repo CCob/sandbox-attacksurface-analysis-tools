@@ -378,6 +378,10 @@ internal sealed class EpMapperClient : RpcClientBase
         ITowers = u.Read_10();
         status = u.ReadInt32();
     }
+
+    protected override INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer) {
+        throw new NotImplementedException();
+    }
 }
 #endregion
 

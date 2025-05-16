@@ -16,5 +16,5 @@ namespace NtCoreLib.Kernel.Alpc;
 
 internal interface IMessageAttributes
 {
-    SafeAlpcMessageAttributesBuffer ToSafeBuffer();
+    public SafeAlpcMessageAttributesBuffer ToSafeBuffer();
 }

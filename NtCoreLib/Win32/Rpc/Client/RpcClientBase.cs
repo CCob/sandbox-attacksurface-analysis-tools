@@ -74,6 +74,15 @@ public abstract class RpcClientBase : IDisposable
     #endregion
 
     #region Protected Methods
+
+    /// <summary>
+    /// Abstract method implemented by the generated client to dispatch RPC callbacks
+    /// </summary>
+    /// <param name="proc_num">The callback procedure number</param>
+    /// <param name="ndr_buffer">Unmarshas NDR buffer for the call</param>
+    /// <returns>Marshaled NDR buffer for the result.</returns>
+    protected abstract INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer);
+
     /// <summary>
     /// Send and receive an RPC message.
     /// </summary>
@@ -88,7 +97,7 @@ public abstract class RpcClientBase : IDisposable
         }
 
         RpcTransportUtils.DumpBuffer(_transport.TraceFlags, RpcTransportTraceFlags.ClientNdr, "NDR Send Data", ndr_buffer.ToArray());
-        var resp = _transport.SendReceive(proc_num, ObjectUuid, ndr_buffer);
+        var resp = _transport.SendReceive(proc_num, ObjectUuid, ndr_buffer, new IRpcClientTransport.RecieveSendCallback(ReceiveSendCallback));
         RpcTransportUtils.DumpBuffer(_transport.TraceFlags, RpcTransportTraceFlags.ClientNdr, "NDR Receive Data", resp.ToArray());
         return resp;
     }

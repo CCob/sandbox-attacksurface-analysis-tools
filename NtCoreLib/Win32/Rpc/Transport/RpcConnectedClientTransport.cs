@@ -633,5 +633,9 @@ public abstract class RpcConnectedClientTransport : IRpcClientTransport
             context.AuthContext?.Dispose();
         }
     }
+
+    public INdrUnmarshalBuffer SendReceive(int proc_num, Guid? objuuid, INdrMarshalBuffer ndr_buffer, IRpcClientTransport.RecieveSendCallback callback_handler = null) {
+        throw new NotImplementedException();
+    }
     #endregion
 }

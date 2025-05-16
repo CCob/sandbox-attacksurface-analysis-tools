@@ -22,6 +22,7 @@ internal enum LRPC_MESSAGE_TYPE
     lmtResponse = 3,
     lmtCancel = 4,
     lmtReservedMessage = 5,     // LRPC_ADDRESS::HandleReservedMessageRequest
+    lmtCallback = 6,
     lmtCallbackAck = 7,
     lmtCallbackNack = 8,
     lmtCallbackRequest = 9,

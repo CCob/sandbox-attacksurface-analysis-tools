@@ -34,7 +34,7 @@ public sealed class AlpcSendMessageAttributes : IMessageAttributes
         return (AlpcHandleMessageAttribute)_attributes[AlpcMessageAttributeFlags.Handle];
     }
 
-    SafeAlpcMessageAttributesBuffer IMessageAttributes.ToSafeBuffer()
+    public SafeAlpcMessageAttributesBuffer ToSafeBuffer()
     {
         if (_attributes.Count == 0)
         {

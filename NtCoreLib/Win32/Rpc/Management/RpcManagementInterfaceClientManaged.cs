@@ -156,6 +156,10 @@ internal class RpcManagementInterfaceClientManaged : IRpcManagementInterface
             princ_name = u.ReadConformantVaryingAnsiString();
             status = u.ReadUInt32();
         }
+
+        protected override INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer) {
+            throw new NotImplementedException();
+        }
     }
     #endregion
 
