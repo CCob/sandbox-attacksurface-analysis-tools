@@ -61,8 +61,4 @@ public sealed class RpcClient : RpcClientBase
     {
         return SendReceiveTransport(proc_num, ndr_buffer);
     }
-
-    protected override INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer) {
-        throw new NotImplementedException();
-    }
 }

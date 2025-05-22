@@ -24,7 +24,7 @@ namespace NtCoreLib.Win32.Rpc.Client;
 /// <summary>
 /// Base class for a RPC client.
 /// </summary>
-public abstract class RpcClientBase : IDisposable
+public class RpcClientBase : IDisposable
 {
     #region Private Members
     private IRpcClientTransport _transport;
@@ -81,7 +81,12 @@ public abstract class RpcClientBase : IDisposable
     /// <param name="proc_num">The callback procedure number</param>
     /// <param name="ndr_buffer">Unmarshas NDR buffer for the call</param>
     /// <returns>Marshaled NDR buffer for the result.</returns>
-    protected abstract INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer);
+    protected virtual INdrMarshalBuffer ReceiveSendCallback(int proc_num, INdrUnmarshalBuffer ndr_buffer) {
+        if (CallbackHandler != null)
+            return CallbackHandler(proc_num, ndr_buffer);
+
+        throw new RpcTransportException("RPC method has invoked a callback and CallbackHander is not set or ReceiveSendCallback not overriden by subclass");             
+    }
 
     /// <summary>
     /// Send and receive an RPC message.
@@ -166,6 +171,12 @@ public abstract class RpcClientBase : IDisposable
     /// Specify the default flags to trace on the connected transport.
     /// </summary>
     public RpcTransportTraceFlags DefaultTraceFlags { get; set; }
+
+    /// <summary>
+    /// A delegate to handle callbacks that have not been handled by a parent class
+    /// </summary>
+    public IRpcClientTransport.RecieveSendCallback CallbackHandler { get; set; }
+
     #endregion
 
     #region Public Methods
