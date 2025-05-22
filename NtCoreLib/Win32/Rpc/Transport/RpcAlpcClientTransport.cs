@@ -163,6 +163,20 @@ public class RpcAlpcClientTransport : IRpcClientTransport
             ndr64: _transfer_syntax == RpcSyntaxIdentifier.NDR64TransferSyntax);
     }
 
+    private INdrUnmarshalBuffer HandleLargeCallback(AlpcMessageRaw message, SafeStructureInOutBuffer<LRPC_LARGE_REQUEST_MESSAGE> request, AlpcReceiveMessageAttributes attributes) {
+        if (!attributes.HasValidAttribute(AlpcMessageAttributeFlags.View)) {
+            throw new RpcTransportException("Large response received but no data view available");
+        }
+
+        return new NdrUnmarshalBuffer(attributes.DataView.ReadBytes(request.Result.LargeDataSize),
+            attributes.Handles, ndr64: _transfer_syntax == RpcSyntaxIdentifier.NDR64TransferSyntax);
+    }
+
+    private INdrUnmarshalBuffer HandleImmediateCallback(AlpcMessageRaw message, SafeStructureInOutBuffer<LRPC_IMMEDIATE_REQUEST_MESSAGE> request, AlpcReceiveMessageAttributes attributes) {
+        return new NdrUnmarshalBuffer(request.Data.ToArray(), attributes.Handles,
+            ndr64: _transfer_syntax == RpcSyntaxIdentifier.NDR64TransferSyntax);
+    }
+
     private AlpcMessageRaw HandleCallbackSequence(IRpcClientTransport.RecieveSendCallback callback_handler, int call_id, AlpcReceiveMessageAttributes attributes) {
 
         if (callback_handler == null) {
@@ -185,44 +199,41 @@ public class RpcAlpcClientTransport : IRpcClientTransport
         //We need to allow request messages for callbacks
         _client.SetPortAttributeFlags(AlpcPortAttributeFlags.AllowLpcRequests | AlpcPortAttributeFlags.AllowImpersonation, true);        
         var ret = _client.Send(AlpcMessageFlags.None, callback_ack_msg, callback_ack_att, NtWaitTimeout.Infinite);
+        _client.Wait();
 
         while (true) {
 
-            var callback_req_atr = new AlpcReceiveMessageAttributes();
-
-            var recvMessage = _client.Receive(AlpcMessageFlags.None, 0x1000, callback_req_atr, NtWaitTimeout.Infinite);
-
-            var recv_buffer = recvMessage.Data.ToBuffer();
-
-            var header = CheckForFault(recv_buffer, new[] { LRPC_MESSAGE_TYPE.lmtCallbackRequest, LRPC_MESSAGE_TYPE.lmtResponse });
+            AlpcReceiveMessageAttributes callback_req_atr = new();
+            var callback_msg = _client.Receive(AlpcMessageFlags.None, 0x1000, callback_req_atr, NtWaitTimeout.Infinite);
+            using var callback_buffer = callback_msg.Data.ToBuffer();
+            var header = CheckForFault(callback_buffer, new[] { LRPC_MESSAGE_TYPE.lmtCallbackRequest, LRPC_MESSAGE_TYPE.lmtResponse });
 
             if (header.MessageType == LRPC_MESSAGE_TYPE.lmtCallbackRequest) {
+                             
+                INdrUnmarshalBuffer ndr_request;
+                var callback_req = callback_buffer.GetStructAtOffset<LRPC_LARGE_REQUEST_MESSAGE>(0);                
 
-                var callback_req = recv_buffer.Read<LRPC_IMMEDIATE_REQUEST_MESSAGE>(0);
+                if ((callback_req.Result.Flags & LRPC_REQUEST_MESSAGE_FLAGS.ViewPresent) == LRPC_REQUEST_MESSAGE_FLAGS.ViewPresent) {
+                    ndr_request = HandleLargeCallback(callback_msg, callback_req, callback_req_atr);
+                } else {
+                    ndr_request = HandleImmediateCallback(callback_msg, callback_buffer.GetStructAtOffset<LRPC_IMMEDIATE_REQUEST_MESSAGE>(0), callback_req_atr);
+                }
 
-                var ndr_response = callback_handler(callback_req.ProcNum, new NdrUnmarshalBuffer(recvMessage.Data.Skip(0x40).ToArray(), callback_req_atr.Handles, default, _transfer_syntax == RpcSyntaxIdentifier.NDR64TransferSyntax));
+                var ndr_response = callback_handler(callback_req.Result.ProcNum, ndr_request);
 
-                var callback_resp = new AlpcMessageType<LRPC_IMMEDIATE_RESPONSE_MESSAGE>(new LRPC_IMMEDIATE_RESPONSE_MESSAGE {
-                    CallId = callback_req.CallId,
-                    Header = new LRPC_HEADER {                        
-                        MessageType = LRPC_MESSAGE_TYPE.lmtCallbackReply,                         
-                    }                    
-                });
-                callback_resp.Header.u3.CallbackId = recvMessage.Header.u3.CallbackId;
-                callback_resp.Header.MessageId = recvMessage.Header.MessageId;
+                byte[] ba = ndr_response.ToArray();
+                if (ba.Length > 0xF00)
+                    SendLargeCallbackResponse(ba, ndr_response.Handles, callback_req.Result.CallId, callback_msg.CallbackId, callback_msg.MessageId);
+                else
+                    SendImmediateCallbackResponse(ba, ndr_response.Handles, callback_req.Result.CallId, callback_msg.CallbackId, callback_msg.MessageId);
 
-                var recv = new AlpcMessageRaw(0x1000);
-                var recv_attr = new AlpcReceiveMessageAttributes();
-
-                ClearAttributes(recvMessage, callback_req_atr);
-                                           
-                _client.SendReceive(AlpcMessageFlags.ReleaseMessage , callback_resp, null, null, null, NtWaitTimeout.Infinite);
+                _client.Wait();
 
             } else {
-                return recvMessage;
+                return callback_msg;
             }
         }
-    }
+    } 
 
     private INdrUnmarshalBuffer HandleResponse(AlpcMessageRaw message, AlpcReceiveMessageAttributes attributes, int call_id, IRpcClientTransport.RecieveSendCallback callback_handler)
     {
@@ -297,6 +308,49 @@ public class RpcAlpcClientTransport : IRpcClientTransport
         INdrUnmarshalBuffer response = HandleResponse(recv_msg, recv_attr, req_msg.CallId, callback_handler);
         ClearAttributes(recv_msg, recv_attr);
         return response;
+    }
+
+    private void SendLargeCallbackResponse(byte[] ndr_buffer, IReadOnlyCollection<NdrSystemHandle> handles, int call_id, int callback_id, int message_id) {
+
+        var callback_resp = new AlpcMessageType<LRPC_LARGE_RESPONSE_MESSAGE>(new LRPC_LARGE_RESPONSE_MESSAGE {
+            CallId = call_id,
+            Header = new LRPC_HEADER {
+                MessageType = LRPC_MESSAGE_TYPE.lmtCallbackReply,
+            }
+        });
+        callback_resp.Header.u3.CallbackId = callback_id;
+        callback_resp.Header.MessageId = message_id;
+        AlpcSendMessageAttributes callback_attr = new();
+
+        if (handles.Count > 0) {
+            callback_attr.AddHandles(handles.Select(h => new AlpcHandleMessageAttributeEntry(h.Handle, h.DesiredAccess)));
+        }
+
+        using var port_section = _client.CreatePortSection(AlpcCreatePortSectionFlags.Secure, ndr_buffer.Length);
+        using var data_view = port_section.CreateSectionView(AlpcDataViewAttrFlags.Secure | AlpcDataViewAttrFlags.AutoRelease, ndr_buffer.Length);
+        data_view.WriteBytes(ndr_buffer);
+        callback_attr.Add(data_view.ToMessageAttribute());
+
+        _client.SendReceive(AlpcMessageFlags.ReleaseMessage, callback_resp, callback_attr, null, null, NtWaitTimeout.Infinite);
+    }
+
+    private void SendImmediateCallbackResponse(byte[] ndr_buffer, IReadOnlyCollection<NdrSystemHandle> handles, int call_id, int callback_id, int message_id) {
+
+        var callback_resp = new AlpcMessageType<LRPC_IMMEDIATE_RESPONSE_MESSAGE>(new LRPC_IMMEDIATE_RESPONSE_MESSAGE {
+            CallId = call_id,
+            Header = new LRPC_HEADER {
+                MessageType = LRPC_MESSAGE_TYPE.lmtCallbackReply,
+            }
+        }, ndr_buffer);
+        callback_resp.Header.u3.CallbackId = callback_id;
+        callback_resp.Header.MessageId = message_id;
+        AlpcSendMessageAttributes callback_attr = new();
+
+        if (handles.Count > 0) {
+            callback_attr.AddHandles(handles.Select(h => new AlpcHandleMessageAttributeEntry(h.Handle, h.DesiredAccess)));
+        }
+
+        _client.SendReceive(AlpcMessageFlags.ReleaseMessage, callback_resp, callback_attr, null, null, NtWaitTimeout.Infinite);
     }
 
     private INdrUnmarshalBuffer SendAndReceiveImmediate(int proc_num, Guid? objuuid, byte[] ndr_buffer, IReadOnlyCollection<NdrSystemHandle> handles, IRpcClientTransport.RecieveSendCallback callback_handler)
