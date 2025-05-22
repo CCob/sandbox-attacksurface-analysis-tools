@@ -161,7 +161,7 @@ public class RpcAlpcClientTransport : IRpcClientTransport
             ndr64: _transfer_syntax == RpcSyntaxIdentifier.NDR64TransferSyntax);
     }
 
-    private AlpcMessageRaw HandleCallbackSequence(IRpcClientTransport.RecieveSendCallback callback_handler, int call_id) {
+    private AlpcMessageRaw HandleCallbackSequence(IRpcClientTransport.RecieveSendCallback callback_handler, int call_id, AlpcReceiveMessageAttributes attributes) {
 
         if (callback_handler == null) {
             throw new RpcTransportException("Server invoking callbacks, but no callback delegate set");
@@ -172,7 +172,7 @@ public class RpcAlpcClientTransport : IRpcClientTransport
 
         var callback_ack_att = new AlpcSendMessageAttributes(new AlpcMessageAttribute[] {
                 new AlpcContextMessageAttribute(){
-                    MessageContext = 0x1234
+                    MessageId = ((AlpcContextMessageAttribute)attributes.GetAttribute(AlpcMessageAttributeFlags.Context)).MessageId
                 },
                 new AlpcSecurityMessageAttribute() {
                     SecurityQoS = ctx.SecurityQualityOfService,
@@ -180,6 +180,8 @@ public class RpcAlpcClientTransport : IRpcClientTransport
                 }
             });
 
+        //We need to allow request messages for callbacks
+        _client.SetPortAttributeFlags(AlpcPortAttributeFlags.AllowLpcRequests | AlpcPortAttributeFlags.AllowImpersonation, true);        
         var ret = _client.Send(AlpcMessageFlags.None, callback_ack_msg, callback_ack_att, NtWaitTimeout.Infinite);
 
         while (true) {
@@ -201,15 +203,18 @@ public class RpcAlpcClientTransport : IRpcClientTransport
                 var callback_resp = new AlpcMessageType<LRPC_IMMEDIATE_RESPONSE_MESSAGE>(new LRPC_IMMEDIATE_RESPONSE_MESSAGE {
                     CallId = callback_req.CallId,
                     Header = new LRPC_HEADER {                        
-                        MessageType = LRPC_MESSAGE_TYPE.lmtCallbackReply,                       
-                    }
+                        MessageType = LRPC_MESSAGE_TYPE.lmtCallbackReply,                         
+                    }                    
                 });
-                //callback_resp.Header.u2.Type = (ushort)AlpcMessageType.Reply;
+                callback_resp.Header.u3.CallbackId = recvMessage.Header.u3.CallbackId;
+                callback_resp.Header.MessageId = recvMessage.Header.MessageId;
 
                 var recv = new AlpcMessageRaw(0x1000);
                 var recv_attr = new AlpcReceiveMessageAttributes();
+
+                ClearAttributes(recvMessage, callback_req_atr);
                                            
-                _client.SendReceive(AlpcMessageFlags.ReplyMessage, callback_resp, null, null, null, NtWaitTimeout.Infinite);
+                _client.SendReceive(AlpcMessageFlags.ReleaseMessage , callback_resp, null, null, null, NtWaitTimeout.Infinite);
 
             } else {
                 return recvMessage;
@@ -225,7 +230,7 @@ public class RpcAlpcClientTransport : IRpcClientTransport
         // Get data as safe buffer.
 
         if (header.MessageType == LRPC_MESSAGE_TYPE.lmtCallback) {          
-            message = HandleCallbackSequence(callback_handler, buffer.Read<LRPC_CALLBACK_MESSAGE>(0).CallId);
+            message = HandleCallbackSequence(callback_handler, buffer.Read<LRPC_CALLBACK_MESSAGE>(0).CallId, attributes);
             buffer = message.Data.ToBuffer();            
         }          
        
