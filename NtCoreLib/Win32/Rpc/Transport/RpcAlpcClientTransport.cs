@@ -42,7 +42,9 @@ public class RpcAlpcClientTransport : IRpcClientTransport
     private static AlpcPortAttributes CreatePortAttributes(SecurityQualityOfService sqos)
     {
         AlpcPortAttributeFlags flags = AlpcPortAttributeFlags.AllowDupObject | 
-            AlpcPortAttributeFlags.AllowImpersonation | AlpcPortAttributeFlags.WaitablePort | AlpcPortAttributeFlags.AllowLpcRequests;
+            AlpcPortAttributeFlags.AllowImpersonation | AlpcPortAttributeFlags.WaitablePort;
+
+
         if (!NtObjectUtils.IsWindows81OrLess)
         {
             flags |= AlpcPortAttributeFlags.AllowMultiHandleAttribute;
